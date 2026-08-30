@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Local browser and visual-test artifacts
+.artifacts/
+.chrome-*/
+.edge-*/
+
+# Environment and OS files
+.env*
+!.env.example
+.DS_Store
+Thumbs.db
+npm-debug.log*
