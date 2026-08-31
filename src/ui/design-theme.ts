@@ -208,6 +208,8 @@ export interface CanvasThemePalette {
   selectedGlow: string
   wireLabel: string
   wireLabelText: string
+  openWire: string
+  openWireText: string
   portOutline: string
   portLabel: string
   pendingWire: string
@@ -233,7 +235,7 @@ const studioCanvas: CanvasThemePalette = {
   background: '#0b1119', gridMinor: '#172332', gridMajor: '#1d2d3d',
   signalIdle: '#58667a', signalUnknown: '#ff4fa3', signalFloating: '#e5a94a', signalHigh: '#4ee6a8', signalLow: '#718198',
   error: '#f15764', errorText: '#ff8992', selected: '#5ee7b0', selectedGlow: 'rgba(78,230,168,.5)',
-  wireLabel: '#0b0e14', wireLabelText: '#aeb9c9', portOutline: '#d3dbe7', portLabel: '#c5cfdd', pendingWire: '#5ee7b0', inversion: '#0b1119',
+  wireLabel: '#0b0e14', wireLabelText: '#aeb9c9', openWire: '#FFB454', openWireText: '#2B1A00', portOutline: '#d3dbe7', portLabel: '#c5cfdd', pendingWire: '#5ee7b0', inversion: '#0b1119',
   previewPanel: 'rgba(5,9,14,.78)', previewBorder: 'rgba(128,158,186,.22)', previewMuted: '#8c9aab', previewValue: '#75ecc0',
   input: '#70b7ff', output: '#65e8b3', inout: '#f1bd6d', separator: 'rgba(128,150,174,.14)', componentMuted: '#8d9caf',
   controlOff: 'rgba(9,14,21,.82)', controlOn: 'rgba(35,92,74,.94)', controlOffBorder: 'rgba(122,139,161,.4)', controlOnBorder: 'rgba(92,238,183,.7)', controlOffText: '#758498', controlOnText: '#8ef2c9',
@@ -249,7 +251,7 @@ function paletteCanvas(preset: ResolvedPalette): CanvasThemePalette {
     gridMinor: mixHex(canvasBackground, ui.text, .075), gridMajor: mixHex(canvasBackground, ui.text, .15),
     signalIdle: ui.muted2, signalUnknown: ui.danger, signalFloating: ui.warning, signalHigh: ui.accent, signalLow: ui.muted,
     error: ui.danger, errorText: mixHex(ui.danger, dark, .22), selected: ui.accent, selectedGlow: rgba(ui.accent, .2),
-    wireLabel: mixHex(canvasBackground, '#FFFFFF', .7), wireLabelText: ui.text, portOutline: mixHex(ui.text, '#FFFFFF', .45), portLabel: ui.text, pendingWire: ui.accent, inversion: canvasBackground,
+    wireLabel: mixHex(canvasBackground, '#FFFFFF', .7), wireLabelText: ui.text, openWire: ui.warning, openWireText: brightness(ui.warning) > 155 ? ui.text : '#FFFFFF', portOutline: mixHex(ui.text, '#FFFFFF', .45), portLabel: ui.text, pendingWire: ui.accent, inversion: canvasBackground,
     previewPanel: rgba(ui.panel, .94), previewBorder: rgba(ui.muted, .34), previewMuted: ui.muted, previewValue: ui.accent,
     input: accent, output: ui.accent, inout: warm, separator: rgba(ui.muted, .2), componentMuted: neutral,
     controlOff: rgba(ui.panel, .94), controlOn: rgba(ui.accentDark, .98), controlOffBorder: rgba(ui.muted, .42), controlOnBorder: rgba(ui.accent, .64), controlOffText: ui.muted, controlOnText: ui.accent,

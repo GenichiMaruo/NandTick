@@ -2,15 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
-  Activity, Box, ChevronRight, CirclePlay, Clock3, Copy, Cpu, Database, Download, FileCode2,
+  Activity, Box, Cable, ChevronDown, ChevronRight, ChevronUp, CirclePlay, Clock3, Copy, Cpu, Database, Download, FileCode2,
   EyeOff, FolderOpen, Gauge, Maximize2, MemoryStick, MousePointer2, Palette, PanelTopOpen,
-  MoonStar, Pause, Play, Plus, Redo2, RotateCcw, Save, Search, Settings2, Shapes, Sparkles, Square,
-  TestTube2, Trash2, Undo2, Upload, Zap,
+  MoonStar, Pause, Play, Plus, Redo2, RotateCcw, Save, Scan, Search, Settings2, Shapes, Sparkles, Square,
+  TestTube2, Trash2, Undo2, Upload, X, Zap,
 } from 'lucide-react'
 import { BUILTIN_LIST, BUILTINS, createBuiltinInstance } from '@/core/builtins'
 import { compileCircuit } from '@/core/compiler'
 import { analyzeDefinitionDelay, analyzeGraphDelay } from '@/core/delay-analysis'
-import { branchNet, connectEndpoints, disconnectEndpoint, forbiddenDefinitions, getInstancePorts, inferNetWidth, removeInstances, setWireBranchRoute, validateProject } from '@/core/graph'
+import { addLooseWire, branchNet, connectEndpoints, connectLooseWire, disconnectEndpoint, forbiddenDefinitions, getInstancePorts, inferNetWidth, removeInstances, removeLooseWire, setLooseWireRoute, setWireBranchRoute, validateProject } from '@/core/graph'
 import { exportHdl, type HdlMode } from '@/core/hdl'
 import type { BuiltinKind, CircuitGraph, CircuitTestCase, ComponentInstance, ComponentVisual, NetEndpoint, Point, PortDirection, Project } from '@/core/model'
 import { cloneProject, createId } from '@/core/model'
@@ -24,6 +24,7 @@ import { DEFAULT_CUSTOM_COLORS, generateHarmoniousPalette, isColorTheme, isDesig
 import { HdlPanel, MemoryPanel, NewComponentDialog, PicoPanel, ProjectsPanel, TestsPanel } from './Panels'
 
 type Dialog = 'new-component' | 'memory' | 'pico' | 'tests' | 'hdl' | 'projects' | null
+type MobilePanel = 'components' | 'inspector' | 'more' | null
 
 const CUSTOM_COLOR_ROLES = ['文字', 'アクセント', '明るい面', 'やさしい色', '差し色']
 
@@ -58,6 +59,10 @@ export function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedNetId, setSelectedNetId] = useState<string | null>(null)
   const [placement, setPlacement] = useState<{ componentId: string; builtin: boolean } | null>(null)
+  const [wireMode, setWireMode] = useState(false)
+  const [marqueeMode, setMarqueeMode] = useState(false)
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const [simulationExpanded, setSimulationExpanded] = useState(false)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [paletteSearch, setPaletteSearch] = useState('')
   const [running, setRunning] = useState(false)
@@ -181,7 +186,7 @@ export function App() {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
-      if (event.key === 'Escape') { setPlacement(null); setPaletteOpen(false) }
+      if (event.key === 'Escape') { setPlacement(null); setWireMode(false); setMarqueeMode(false); setPaletteOpen(false); setMobilePanel(null) }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection() }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo() }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo() }
@@ -235,8 +240,16 @@ export function App() {
           id: createId('net'),
           endpoints: cloned.endpoints.map(mapEndpoint),
           route: cloned.route ? {
-            root: mapEndpoint(cloned.route.root),
+            root: cloned.route.root ? mapEndpoint(cloned.route.root) : undefined,
             branches: cloned.route.branches.map(branch => ({ endpoint: mapEndpoint(branch.endpoint), points: branch.points.map(point => ({ x: point.x + 32, y: point.y + 32 })) })),
+            looseWires: cloned.route.looseWires?.map(wire => ({
+              ...wire,
+              start: { x: wire.start.x + 32, y: wire.start.y + 32 },
+              end: { x: wire.end.x + 32, y: wire.end.y + 32 },
+              points: wire.points.map(point => ({ x: point.x + 32, y: point.y + 32 })),
+              startEndpoint: wire.startEndpoint ? mapEndpoint(wire.startEndpoint) : undefined,
+              endEndpoint: wire.endEndpoint ? mapEndpoint(wire.endEndpoint) : undefined,
+            })),
           } : undefined,
         }
       })
@@ -251,19 +264,47 @@ export function App() {
     const position = { x: Math.round(point.x / 8) * 8, y: Math.round(point.y / 8) * 8 }
     const instance = builtin ? createBuiltinInstance(componentId as BuiltinKind, position.x, position.y, id) : { ...customInstance(componentId, project.definitions, position), id }
     setGraph(current => ({ ...current, instances: [...current.instances, instance] }))
-    setSelectedIds([id]); setSelectedNetId(null); setPlacement(null)
+    setSelectedIds([id]); setSelectedNetId(null); setPlacement(null); setWireMode(false)
   }
   const move = (ids: string[], delta: Point) => setGraph(current => {
     const moved = new Set(ids)
     return {
       ...current,
       instances: current.instances.map(instance => moved.has(instance.id) ? { ...instance, position: { x: instance.position.x + delta.x, y: instance.position.y + delta.y } } : instance),
-      nets: current.nets.map(net => net.route && net.endpoints.every(endpoint => moved.has(endpoint.instanceId)) ? { ...net, route: { ...net.route, branches: net.route.branches.map(branch => ({ ...branch, points: branch.points.map(point => ({ x: point.x + delta.x, y: point.y + delta.y })) })) } } : net),
+      nets: current.nets.map(net => {
+        if (!net.route) return net
+        const moveAttachedRoute = net.endpoints.length > 0 && net.endpoints.every(endpoint => moved.has(endpoint.instanceId))
+        return {
+          ...net,
+          route: {
+            ...net.route,
+            branches: net.route.branches.map(branch => moveAttachedRoute ? { ...branch, points: branch.points.map(point => ({ x: point.x + delta.x, y: point.y + delta.y })) } : branch),
+            looseWires: net.route.looseWires?.map(wire => {
+              const startMoved = Boolean(wire.startEndpoint && moved.has(wire.startEndpoint.instanceId))
+              const endMoved = Boolean(wire.endEndpoint && moved.has(wire.endEndpoint.instanceId))
+              return {
+                ...wire,
+                start: startMoved ? { x: wire.start.x + delta.x, y: wire.start.y + delta.y } : wire.start,
+                end: endMoved ? { x: wire.end.x + delta.x, y: wire.end.y + delta.y } : wire.end,
+                points: startMoved && endMoved ? wire.points.map(point => ({ x: point.x + delta.x, y: point.y + delta.y })) : wire.points,
+              }
+            }),
+          },
+        }
+      }),
     }
   })
   const connect = (first: NetEndpoint, second: NetEndpoint) => setGraph(current => connectEndpoints(current, first, second, project.definitions, createId))
   const routeWire = (netId: string, root: NetEndpoint, routes: Array<{ endpoint: NetEndpoint; points: Point[] }>) => setGraph(current => routes.reduce((next, route) => setWireBranchRoute(next, netId, root, route.endpoint, route.points), current))
   const createWireBranch = (netId: string, root: NetEndpoint, sourceEndpoint: NetEndpoint, sourcePoints: Point[], targetEndpoint: NetEndpoint, targetPoints: Point[]) => setGraph(current => branchNet(current, netId, root, sourceEndpoint, sourcePoints, targetEndpoint, targetPoints, project.definitions, createId))
+  const createLooseWire = (start: Point, end: Point, points: Point[], startEndpoint?: NetEndpoint, endEndpoint?: NetEndpoint, netId?: string, startJunction?: boolean, endJunction?: boolean) => setGraph(current => addLooseWire(current, { start, end, points, startEndpoint, endEndpoint, startJunction, endJunction }, project.definitions, createId, netId))
+  const routeLooseWire = (netId: string, wireId: string, points: Point[], start?: Point, end?: Point) => setGraph(current => setLooseWireRoute(current, netId, wireId, points, start, end))
+  const attachLooseWire = (netId: string, wireId: string, side: 'start' | 'end', endpoint: NetEndpoint, point: Point) => setGraph(current => connectLooseWire(current, netId, wireId, side, endpoint, point, project.definitions, createId))
+  const deleteLooseWire = (netId: string, wireId: string) => {
+    const net = graph.nets.find(candidate => candidate.id === netId)
+    setGraph(current => removeLooseWire(current, netId, wireId))
+    if (net && (net.route?.looseWires?.length ?? 0) <= 1 && net.endpoints.length < 2) setSelectedNetId(null)
+  }
   const removeWireBranch = (netId: string, endpoint: NetEndpoint) => {
     const net = graph.nets.find(candidate => candidate.id === netId)
     setGraph(current => disconnectEndpoint(current, endpoint))
@@ -364,7 +405,7 @@ export function App() {
     <header className="topbar">
       <div className="brand" onDoubleClick={surprisePalette} title="ヒント: ダブルクリックで配色をおまかせ"><div className="brand-mark"><Zap size={19} /></div><div><strong>NandTick</strong><span>LOGIC CIRCUIT STUDIO</span></div></div>
       <div className="project-heading"><input value={project.name} onChange={event => commit(previous => ({ ...previous, name: event.target.value, updatedAt: new Date().toISOString() }))} /><div className="save-state"><span className={savedState} />{savedState === 'saving' ? 'Saving…' : savedState === 'saved' ? 'Saved locally' : 'Local only'}</div></div>
-      <nav className="top-actions">
+      <nav className={`top-actions ${mobilePanel === 'more' ? 'mobile-open' : ''}`} aria-label="プロジェクトと表示の操作">
         <div className="design-switcher" ref={palettePickerRef} role="group" aria-label="デザインテーマ">
           <button className={designTheme === 'studio' ? 'active' : ''} aria-pressed={designTheme === 'studio'} title="Studio · フラットダーク" onClick={() => { setDesignTheme('studio'); setPaletteOpen(false) }}><MoonStar size={14} /><span>Studio</span></button>
           <button className={isColorTheme(designTheme) ? 'active palette-trigger' : 'palette-trigger'} aria-pressed={isColorTheme(designTheme)} aria-expanded={paletteOpen} title="5色パレットを選ぶ・編集する" onClick={() => { if (designTheme === 'studio') setDesignTheme(lastPalette); setPaletteOpen(value => !value) }}>
@@ -383,39 +424,41 @@ export function App() {
             </section>
           </div>}
         </div>
-        <button onClick={openProjects} title="Projects"><FolderOpen size={17} /><span>Projects</span></button><button onClick={() => downloadText(`${project.name}.nandtick.json`, exportProject(project), 'application/json')}><Download size={17} /><span>Export</span></button><button onClick={() => projectImportRef.current?.click()}><Upload size={17} /><span>Import</span></button><button onClick={() => setDialog('hdl')}><FileCode2 size={17} /><span>HDL</span></button><input ref={projectImportRef} type="file" accept=".json,.nandtick.json" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importProjectFile(file); event.target.value = '' }} />
+        <button onClick={() => { openProjects(); setMobilePanel(null) }} title="Projects"><FolderOpen size={17} /><span>Projects</span></button><button onClick={() => downloadText(`${project.name}.nandtick.json`, exportProject(project), 'application/json')}><Download size={17} /><span>Export</span></button><button onClick={() => projectImportRef.current?.click()}><Upload size={17} /><span>Import</span></button><button onClick={() => { setDialog('hdl'); setMobilePanel(null) }}><FileCode2 size={17} /><span>HDL</span></button><input ref={projectImportRef} type="file" accept=".json,.nandtick.json" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importProjectFile(file); event.target.value = '' }} />
       </nav>
     </header>
 
     <div className="workspace">
-      <aside className="palette-sidebar">
-        <div className="sidebar-title"><div><span className="eyebrow">LIBRARY</span><h2>Components</h2></div><button className="icon-button accent" title="New component" onClick={() => setDialog('new-component')}><Plus size={18} /></button></div>
+      <aside className={`palette-sidebar ${mobilePanel === 'components' ? 'mobile-open' : ''}`} aria-label="部品ライブラリ">
+        <div className="sidebar-title"><div><span className="eyebrow">LIBRARY</span><h2>Components</h2></div><div className="sidebar-actions"><button className="icon-button accent" title="New component" onClick={() => setDialog('new-component')}><Plus size={18} /></button><button className="icon-button mobile-panel-close" title="回路に戻る" onClick={() => setMobilePanel(null)}><X size={18} /></button></div></div>
         <label className="search-box"><Search size={15} /><input placeholder="Search gates, memory…" value={paletteSearch} onChange={event => setPaletteSearch(event.target.value)} /></label>
         <div className="palette-scroll">
-          {Object.entries(groupedBuiltins).map(([category, items]) => <section className="palette-group" key={category}><h3>{category}</h3><div className="palette-grid">{items!.map(item => <button key={item.kind} className={placement?.componentId === item.kind ? 'active' : ''} onClick={() => setPlacement({ componentId: item.kind, builtin: true })} title={item.description}><span className="palette-symbol">{item.kind === 'AND' ? '&' : item.kind === 'OR' ? '≥1' : item.kind === 'NOT' ? '¬' : item.kind === 'RAM_256x8' ? 'RAM' : item.kind === 'PICO88_DISPLAY' ? '▦' : item.name.slice(0, 3).toUpperCase()}</span><span>{item.name}</span></button>)}</div></section>)}
-          <section className="palette-group"><h3>Custom <span>{filteredDefinitions.length}</span></h3>{filteredDefinitions.length ? <div className="custom-list">{filteredDefinitions.map(definition => { const delay = analyzeDefinitionDelay(definition, project.definitions); return <button key={definition.id} className={placement?.componentId === definition.id ? 'active' : ''} onClick={() => setPlacement({ componentId: definition.id, builtin: false })}><Box size={16} /><div><strong>{definition.name}</strong><span>{definition.ports.length} ports · {delay.maxDelay ?? 'dynamic'}t</span></div></button> })}</div> : <div className="palette-empty">No reusable components</div>}</section>
+          {Object.entries(groupedBuiltins).map(([category, items]) => <section className="palette-group" key={category}><h3>{category}</h3><div className="palette-grid">{items!.map(item => <button key={item.kind} className={placement?.componentId === item.kind ? 'active' : ''} onClick={() => { setPlacement({ componentId: item.kind, builtin: true }); setWireMode(false); setMarqueeMode(false); setMobilePanel(null) }} title={item.description}><span className="palette-symbol">{item.kind === 'AND' ? '&' : item.kind === 'OR' ? '≥1' : item.kind === 'NOT' ? '¬' : item.kind === 'RAM_256x8' ? 'RAM' : item.kind === 'PICO88_DISPLAY' ? '▦' : item.name.slice(0, 3).toUpperCase()}</span><span>{item.name}</span></button>)}</div></section>)}
+          <section className="palette-group"><h3>Custom <span>{filteredDefinitions.length}</span></h3>{filteredDefinitions.length ? <div className="custom-list">{filteredDefinitions.map(definition => { const delay = analyzeDefinitionDelay(definition, project.definitions); return <button key={definition.id} className={placement?.componentId === definition.id ? 'active' : ''} onClick={() => { setPlacement({ componentId: definition.id, builtin: false }); setWireMode(false); setMarqueeMode(false); setMobilePanel(null) }}><Box size={16} /><div><strong>{definition.name}</strong><span>{definition.ports.length} ports · {delay.maxDelay ?? 'dynamic'}t</span></div></button> })}</div> : <div className="palette-empty">No reusable components</div>}</section>
         </div>
       </aside>
 
       <section className="editor-column">
         <div className="editor-toolbar">
           <div className="breadcrumbs"><button onClick={() => setScopeStack([])}><Cpu size={15} /> Main</button>{scopeStack.map((id, index) => { const definition = project.definitions.find(item => item.id === id); return <span key={`${id}${index}`}><ChevronRight size={14} /><button onClick={() => setScopeStack(items => items.slice(0, index + 1))}>{definition?.name ?? 'Missing'}</button></span> })}</div>
-          <div className="edit-tools"><button title="Select"><MousePointer2 size={16} /></button><i /><button onClick={undo} disabled={!past.current.length} title="Undo"><Undo2 size={16} /></button><button onClick={redo} disabled={!future.current.length} title="Redo"><Redo2 size={16} /></button><button onClick={copySelection} disabled={!selectedIds.length} title="Copy"><Copy size={16} /></button><button onClick={duplicateSelection} disabled={!selectedIds.length} title="Duplicate"><Shapes size={16} /></button><button onClick={deleteSelection} disabled={!selectedIds.length && !selectedNetId} title="Delete"><Trash2 size={16} /></button></div>
+          <div className="edit-tools"><button className={!wireMode && !placement && !marqueeMode ? 'active' : ''} onClick={() => { setWireMode(false); setPlacement(null); setMarqueeMode(false) }} title="Select / Pan"><MousePointer2 size={16} /></button><button className={marqueeMode ? 'active' : ''} onClick={() => { setWireMode(false); setPlacement(null); setMarqueeMode(true) }} title="Range select"><Scan size={16} /></button><button className={wireMode ? 'active' : ''} onClick={() => { setWireMode(true); setPlacement(null); setMarqueeMode(false) }} title="Wire"><Cable size={16} /></button><i /><button onClick={undo} disabled={!past.current.length} title="Undo"><Undo2 size={16} /></button><button onClick={redo} disabled={!future.current.length} title="Redo"><Redo2 size={16} /></button><button onClick={copySelection} disabled={!selectedIds.length} title="Copy"><Copy size={16} /></button><button onClick={duplicateSelection} disabled={!selectedIds.length} title="Duplicate"><Shapes size={16} /></button><button onClick={deleteSelection} disabled={!selectedIds.length && !selectedNetId} title="Delete"><Trash2 size={16} /></button></div>
           <div className="scope-timing"><Clock3 size={14} /><span>Max delay</span><strong>{scopeDelay.maxDelay === null ? 'feedback / dynamic' : `${scopeDelay.maxDelay} ticks`}</strong></div>
         </div>
         <div className="canvas-area">
-          <CircuitCanvas graph={graph} definitions={project.definitions} simulator={simulator} revision={revision} selectedIds={selectedIds} selectedNetId={selectedNetId} placement={placement} theme={designTheme} customColors={customColors} onSelection={(ids, netId) => { setSelectedIds(ids); setSelectedNetId(netId) }} onPlace={place} onMove={move} onConnect={connect} onWireRoute={routeWire} onWireBranch={createWireBranch} onRemoveWireBranch={removeWireBranch} onOpenComponent={id => setScopeStack(items => [...items, id])} onToggle={toggleInput} onPreviewMode={cyclePreview} issues={issues} />
+          <CircuitCanvas graph={graph} definitions={project.definitions} simulator={simulator} revision={revision} selectedIds={selectedIds} selectedNetId={selectedNetId} placement={placement} wireMode={wireMode} marqueeMode={marqueeMode} theme={designTheme} customColors={customColors} onSelection={(ids, netId) => { setSelectedIds(ids); setSelectedNetId(netId) }} onPlace={place} onMove={move} onConnect={connect} onWireRoute={routeWire} onWireBranch={createWireBranch} onCreateLooseWire={createLooseWire} onLooseWireRoute={routeLooseWire} onAttachLooseWire={attachLooseWire} onRemoveLooseWire={deleteLooseWire} onRemoveWireBranch={removeWireBranch} onOpenComponent={id => setScopeStack(items => [...items, id])} onToggle={toggleInput} onPreviewMode={cyclePreview} issues={issues} />
           {placement && <div className="placement-hint"><MousePointer2 size={15} /> Canvasをクリックして {placement.builtin ? BUILTINS[placement.componentId as BuiltinKind].name : project.definitions.find(definition => definition.id === placement.componentId)?.name} を配置</div>}
+          {wireMode && !placement && <div className="placement-hint"><Cable size={15} /> 空白またはポートをクリックして配線を開始</div>}
         </div>
-        <div className="simulation-bar">
+        <div className={`simulation-bar ${simulationExpanded ? 'mobile-expanded' : ''}`}>
+          <button className="mobile-sim-toggle" aria-expanded={simulationExpanded} title={simulationExpanded ? 'シミュレーション詳細を閉じる' : 'シミュレーション詳細を開く'} onClick={() => setSimulationExpanded(value => !value)}><Gauge size={15} /><span>{simulationExpanded ? '閉じる' : '詳細'}</span>{simulationExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
           <div className="transport"><button className="reset-button" onClick={reset} title="Reset"><RotateCcw size={17} /></button>{running ? <button className="pause-button" onClick={() => setRunning(false)}><Pause size={17} /> Pause</button> : <button className="run-button" disabled={errors.length > 0} onClick={() => setRunning(true)}><Play size={17} /> Run</button>}<button onClick={() => doAdvance(1)}>+1 Tick</button><button onClick={() => doAdvance(10)}>+10</button><div className="advance-control"><input type="number" min="1" value={advanceCount} onChange={event => setAdvanceCount(Math.max(1, Number(event.target.value)))} /><button onClick={() => doAdvance(advanceCount)}>Advance</button></div></div>
           <div className="sim-stats"><div><span>CURRENT TICK</span><strong>{stats.currentTick.toLocaleString()}</strong></div><div><span>PENDING</span><strong>{stats.pendingEvents.toLocaleString()}</strong></div><div><span>SPEED</span><strong>{(1000 / project.settings.tickDurationMs).toFixed(project.settings.tickDurationMs >= 100 ? 0 : 1)} tick/s</strong></div></div>
           <div className="tick-speed"><label><span>Tick duration</span><input type="range" min="1" max="1000" step="1" value={project.settings.tickDurationMs} onChange={event => commit(previous => ({ ...previous, settings: { ...previous.settings, tickDurationMs: Number(event.target.value) } }))} /></label><div><input type="number" min="0.1" max="10000" step="0.1" value={project.settings.tickDurationMs} onChange={event => commit(previous => ({ ...previous, settings: { ...previous.settings, tickDurationMs: Math.max(0.1, Number(event.target.value)) } }))} /><span>ms/tick</span></div></div>
         </div>
       </section>
 
-      <aside className="inspector-sidebar">
-        <div className="inspector-tabs"><button className="active"><Settings2 size={15} /> Inspector</button><button onClick={() => setDialog('tests')}><TestTube2 size={15} /> Tests</button></div>
+      <aside className={`inspector-sidebar ${mobilePanel === 'inspector' ? 'mobile-open' : ''}`} aria-label="設定と検証">
+        <div className="inspector-tabs"><button className="active"><Settings2 size={15} /> Inspector</button><button onClick={() => { setDialog('tests'); setMobilePanel(null) }}><TestTube2 size={15} /> Tests</button><button className="mobile-panel-close" title="回路に戻る" onClick={() => setMobilePanel(null)}><X size={18} /></button></div>
         <div className="inspector-scroll">
           {selected ? <InstanceInspector instance={selected} project={project} simulator={simulator} definitions={project.definitions} updateInstance={updateInstance} updateParameter={updateParameter} onDelete={deleteSelection} onDuplicate={duplicateSelection} onMemory={() => setDialog('memory')} onPico={() => setDialog('pico')} onDefinitionVisual={(definitionId, key, value) => commit(previous => ({ ...previous, definitions: previous.definitions.map(definition => definition.id === definitionId ? { ...definition, visual: { ...definition.visual, [key]: value } } : definition), updatedAt: new Date().toISOString() }))} />
           : selectedNet ? <NetInspector net={selectedNet} graph={graph} simulator={simulator} />
@@ -423,6 +466,13 @@ export function App() {
         </div>
       </aside>
     </div>
+
+    <nav className="mobile-dock" aria-label="作業パネル">
+      <button className={mobilePanel === 'components' ? 'active' : ''} aria-pressed={mobilePanel === 'components'} onClick={() => { setPaletteOpen(false); setMobilePanel(value => value === 'components' ? null : 'components') }}><Box size={19} /><span>部品</span></button>
+      <button className={mobilePanel === null ? 'active' : ''} aria-pressed={mobilePanel === null} onClick={() => { setPaletteOpen(false); setMobilePanel(null) }}><Cpu size={19} /><span>回路</span></button>
+      <button className={mobilePanel === 'inspector' ? 'active' : ''} aria-pressed={mobilePanel === 'inspector'} onClick={() => { setPaletteOpen(false); setMobilePanel(value => value === 'inspector' ? null : 'inspector') }}><Settings2 size={19} /><span>設定</span></button>
+      <button className={mobilePanel === 'more' ? 'active' : ''} aria-pressed={mobilePanel === 'more'} onClick={() => { setPaletteOpen(false); setMobilePanel(value => value === 'more' ? null : 'more') }}><PanelTopOpen size={19} /><span>その他</span></button>
+    </nav>
 
     {paletteNotice && <div className="palette-toast"><Sparkles size={16} /><div><strong>おまかせ配色</strong><span>{paletteNotice}</span></div></div>}
     {stats.oscillation && <div className="fatal-toast"><Activity size={18} /><div><strong>Simulation paused</strong><span>{stats.oscillation}</span></div></div>}

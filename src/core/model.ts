@@ -88,10 +88,26 @@ export interface WireBranchRoute {
   points: Point[]
 }
 
+export interface LooseWireRoute {
+  id: string
+  /** Fallback coordinates keep the wire visible if an attached component is removed. */
+  start: Point
+  end: Point
+  /** Editable world-space bend points between the two anchors. */
+  points: Point[]
+  startEndpoint?: NetEndpoint
+  endEndpoint?: NetEndpoint
+  /** This free-coordinate anchor is electrically joined to another segment in the same net. */
+  startJunction?: boolean
+  endJunction?: boolean
+}
+
 export interface WireRoute {
-  /** Every branch starts at this endpoint; routing is presentation-only. */
-  root: NetEndpoint
+  /** Every attached branch starts here. Free-standing wires do not need a root. */
+  root?: NetEndpoint
   branches: WireBranchRoute[]
+  /** Persisted open-ended or free-standing wire segments belonging to this net. */
+  looseWires?: LooseWireRoute[]
 }
 
 export interface Net {

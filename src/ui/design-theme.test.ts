@@ -31,9 +31,11 @@ describe('design themes', () => {
 
   it('keeps Studio colors exact and derives palette-colored components', () => {
     expect(componentColors(visual, 'studio')).toEqual({ fill: visual.fill, border: visual.border, text: visual.text })
+    expect(CANVAS_THEMES.studio.openWire).toBe('#FFB454')
     PALETTE_THEMES.forEach(theme => {
       expect(componentColors(visual, theme.id).fill).not.toBe(visual.fill)
       expect(CANVAS_THEMES[theme.id].background).not.toBe(CANVAS_THEMES.studio.background)
+      expect(CANVAS_THEMES[theme.id].openWire).toMatch(/^#[\da-f]{6}$/i)
       expect(themeVariables(theme.id)['--accent']).toBe(theme.ui.accent)
     })
   })

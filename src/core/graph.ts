@@ -3,6 +3,7 @@ import type {
   CircuitGraph,
   ComponentDefinition,
   ComponentInstance,
+  LooseWireRoute,
   Net,
   NetEndpoint,
   Point,
@@ -51,7 +52,14 @@ export function connectEndpoints(
   let nets: Net[]
   if (firstNet && secondNet) {
     const mergedEndpoints = uniqueEndpoints([...firstNet.endpoints, ...secondNet.endpoints])
-    const merged = { ...firstNet, endpoints: mergedEndpoints, width: inferNetWidth(mergedEndpoints, graph, definitions) }
+    const routeSource = firstNet.route ?? secondNet.route
+    const looseWires = [...(firstNet.route?.looseWires ?? []), ...(secondNet.route?.looseWires ?? [])]
+    const route = routeSource || looseWires.length ? {
+      root: routeSource?.root ?? mergedEndpoints[0],
+      branches: routeSource?.branches ?? [],
+      looseWires,
+    } : undefined
+    const merged = pruneWireRoute({ ...firstNet, endpoints: mergedEndpoints, width: inferNetWidth(mergedEndpoints, graph, definitions), route })
     nets = graph.nets.filter(net => net.id !== secondNet.id).map(net => net.id === firstNet.id ? merged : net)
   } else if (firstNet || secondNet) {
     const existing = firstNet ?? secondNet!
@@ -78,13 +86,19 @@ function uniqueEndpoints(endpoints: NetEndpoint[]): NetEndpoint[] {
 function pruneWireRoute(net: Net): Net {
   if (!net.route) return net
   const endpointKeys = new Set(net.endpoints.map(endpointKey))
-  const root = endpointKeys.has(endpointKey(net.route.root)) ? net.route.root : net.endpoints[0]
-  if (!root) return { ...net, route: undefined }
+  const root = net.route.root && endpointKeys.has(endpointKey(net.route.root)) ? net.route.root : net.endpoints[0]
+  const looseWires = (net.route.looseWires ?? []).map(wire => ({
+    ...wire,
+    startEndpoint: wire.startEndpoint && endpointKeys.has(endpointKey(wire.startEndpoint)) ? wire.startEndpoint : undefined,
+    endEndpoint: wire.endEndpoint && endpointKeys.has(endpointKey(wire.endEndpoint)) ? wire.endEndpoint : undefined,
+  }))
+  if (!root && !looseWires.length) return { ...net, route: undefined }
   return {
     ...net,
     route: {
       root,
-      branches: net.route.branches.filter(branch => endpointKeys.has(endpointKey(branch.endpoint)) && endpointKey(branch.endpoint) !== endpointKey(root)),
+      branches: root ? net.route.branches.filter(branch => endpointKeys.has(endpointKey(branch.endpoint)) && endpointKey(branch.endpoint) !== endpointKey(root)) : [],
+      looseWires,
     },
   }
 }
@@ -97,7 +111,179 @@ export function setWireBranchRoute(graph: CircuitGraph, netId: string, root: Net
       const endpointKeys = new Set(net.endpoints.map(endpointKey))
       if (!endpointKeys.has(endpointKey(root)) || !endpointKeys.has(endpointKey(endpoint)) || endpointKey(root) === endpointKey(endpoint)) return net
       const branches = (net.route?.branches ?? []).filter(branch => endpointKey(branch.endpoint) !== endpointKey(endpoint))
-      return { ...net, route: { root, branches: [...branches, { endpoint, points }] } }
+      return { ...net, route: { root, branches: [...branches, { endpoint, points }], looseWires: net.route?.looseWires } }
+    }),
+  }
+}
+
+export function addLooseWire(
+  graph: CircuitGraph,
+  wire: Omit<LooseWireRoute, 'id'>,
+  definitions: ComponentDefinition[],
+  createId: (prefix: string) => string,
+  netId?: string,
+): CircuitGraph {
+  const anchors = uniqueEndpoints([wire.startEndpoint, wire.endEndpoint].filter((endpoint): endpoint is NetEndpoint => Boolean(endpoint)))
+  const looseWire: LooseWireRoute = { ...wire, id: createId('loose') }
+  let next = graph
+  let resolvedNetId = netId ?? graph.nets.find(net => anchors.some(anchor => net.endpoints.some(endpoint => endpointKey(endpoint) === endpointKey(anchor))))?.id
+
+  if (resolvedNetId) for (const anchor of anchors) {
+    const target = next.nets.find(net => net.id === resolvedNetId)
+    if (!target) break
+    const owner = next.nets.find(net => net.endpoints.some(endpoint => endpointKey(endpoint) === endpointKey(anchor)))
+    if (owner && owner.id !== target.id) {
+      if (target.endpoints.length) {
+        const sourceEndpoint = target.endpoints[0]
+        next = connectEndpoints(next, sourceEndpoint, anchor, definitions, createId)
+        resolvedNetId = next.nets.find(net => net.endpoints.some(endpoint => endpointKey(endpoint) === endpointKey(sourceEndpoint)) && net.endpoints.some(endpoint => endpointKey(endpoint) === endpointKey(anchor)))?.id ?? target.id
+      } else {
+        const targetLooseWires = target.route?.looseWires ?? []
+        next = {
+          ...next,
+          nets: next.nets.filter(net => net.id !== target.id).map(net => net.id !== owner.id ? net : {
+            ...net,
+            route: {
+              root: net.route?.root ?? net.endpoints[0],
+              branches: net.route?.branches ?? [],
+              looseWires: [...(net.route?.looseWires ?? []), ...targetLooseWires],
+            },
+          }),
+        }
+        resolvedNetId = owner.id
+      }
+    } else if (!owner) {
+      next = {
+        ...next,
+        nets: next.nets.map(net => {
+          if (net.id !== target.id) return net
+          const endpoints = uniqueEndpoints([...net.endpoints, anchor])
+          return { ...net, endpoints, width: inferNetWidth(endpoints, next, definitions) }
+        }),
+      }
+    }
+  }
+
+  const existing = resolvedNetId ? next.nets.find(net => net.id === resolvedNetId) : undefined
+  if (!existing) {
+    const id = createId('net')
+    const endpoints = anchors
+    return {
+      ...next,
+      nets: [...next.nets, {
+        id,
+        endpoints,
+        width: inferNetWidth(endpoints, next, definitions),
+        route: { root: endpoints[0], branches: [], looseWires: [looseWire] },
+      }],
+    }
+  }
+  return {
+    ...next,
+    nets: next.nets.map(net => {
+      if (net.id !== existing.id) return net
+      const endpoints = uniqueEndpoints([...net.endpoints, ...anchors])
+      return {
+        ...net,
+        endpoints,
+        width: inferNetWidth(endpoints, next, definitions),
+        route: {
+          root: net.route?.root ?? endpoints[0],
+          branches: net.route?.branches ?? [],
+          looseWires: [...(net.route?.looseWires ?? []), looseWire],
+        },
+      }
+    }),
+  }
+}
+
+export function setLooseWireRoute(graph: CircuitGraph, netId: string, wireId: string, points: Point[], start?: Point, end?: Point): CircuitGraph {
+  return {
+    ...graph,
+    nets: graph.nets.map(net => net.id !== netId || !net.route ? net : {
+      ...net,
+      route: {
+        ...net.route,
+        looseWires: (net.route.looseWires ?? []).map(wire => wire.id === wireId ? {
+          ...wire,
+          points,
+          start: start ?? wire.start,
+          end: end ?? wire.end,
+        } : wire),
+      },
+    }),
+  }
+}
+
+export function connectLooseWire(
+  graph: CircuitGraph,
+  netId: string,
+  wireId: string,
+  side: 'start' | 'end',
+  endpoint: NetEndpoint,
+  point: Point,
+  definitions: ComponentDefinition[],
+  createId: (prefix: string) => string,
+): CircuitGraph {
+  const sourceNet = graph.nets.find(net => net.id === netId)
+  const looseWire = sourceNet?.route?.looseWires?.find(wire => wire.id === wireId)
+  if (!sourceNet || !looseWire) return graph
+  const owner = graph.nets.find(net => net.endpoints.some(candidate => endpointKey(candidate) === endpointKey(endpoint)))
+  let next = graph
+  let resolvedNetId = sourceNet.id
+
+  if (owner && owner.id !== sourceNet.id) {
+    if (sourceNet.endpoints.length) {
+      const sourceEndpoint = sourceNet.endpoints[0]
+      next = connectEndpoints(next, sourceEndpoint, endpoint, definitions, createId)
+      resolvedNetId = next.nets.find(net => net.endpoints.some(candidate => endpointKey(candidate) === endpointKey(sourceEndpoint)) && net.endpoints.some(candidate => endpointKey(candidate) === endpointKey(endpoint)))?.id ?? sourceNet.id
+    } else {
+      next = {
+        ...next,
+        nets: next.nets.filter(net => net.id !== sourceNet.id).map(net => net.id !== owner.id ? net : {
+          ...net,
+          route: {
+            root: net.route?.root ?? net.endpoints[0],
+            branches: net.route?.branches ?? [],
+            looseWires: [...(net.route?.looseWires ?? []), ...(sourceNet.route?.looseWires ?? [])],
+          },
+        }),
+      }
+      resolvedNetId = owner.id
+    }
+  } else if (!owner) {
+    next = {
+      ...next,
+      nets: next.nets.map(net => {
+        if (net.id !== sourceNet.id) return net
+        const endpoints = uniqueEndpoints([...net.endpoints, endpoint])
+        return { ...net, endpoints, width: inferNetWidth(endpoints, { ...next, nets: next.nets }, definitions) }
+      }),
+    }
+  }
+
+  return {
+    ...next,
+    nets: next.nets.map(net => net.id !== resolvedNetId || !net.route ? net : {
+      ...net,
+      route: {
+        ...net.route,
+        looseWires: (net.route.looseWires ?? []).map(wire => wire.id !== wireId ? wire : side === 'start'
+          ? { ...wire, start: point, startEndpoint: endpoint }
+          : { ...wire, end: point, endEndpoint: endpoint }),
+      },
+    }),
+  }
+}
+
+export function removeLooseWire(graph: CircuitGraph, netId: string, wireId: string): CircuitGraph {
+  return {
+    ...graph,
+    nets: graph.nets.flatMap(net => {
+      if (net.id !== netId || !net.route) return [net]
+      const looseWires = (net.route.looseWires ?? []).filter(wire => wire.id !== wireId)
+      if (!looseWires.length && net.endpoints.length < 2) return []
+      return [pruneWireRoute({ ...net, route: { ...net.route, looseWires } })]
     }),
   }
 }
@@ -127,7 +313,7 @@ export function disconnectEndpoint(graph: CircuitGraph, endpoint: NetEndpoint): 
     ...graph,
     nets: graph.nets
       .map(net => pruneWireRoute({ ...net, endpoints: net.endpoints.filter(candidate => endpointKey(candidate) !== endpointKey(endpoint)) }))
-      .filter(net => net.endpoints.length > 1),
+      .filter(net => net.endpoints.length > 1 || Boolean(net.route?.looseWires?.length)),
   }
 }
 
@@ -136,7 +322,7 @@ export function removeInstances(graph: CircuitGraph, ids: Set<string>): CircuitG
     instances: graph.instances.filter(instance => !ids.has(instance.id)),
     nets: graph.nets
       .map(net => pruneWireRoute({ ...net, endpoints: net.endpoints.filter(endpoint => !ids.has(endpoint.instanceId)) }))
-      .filter(net => net.endpoints.length > 1),
+      .filter(net => net.endpoints.length > 1 || Boolean(net.route?.looseWires?.length)),
   }
 }
 

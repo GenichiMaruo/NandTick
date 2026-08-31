@@ -84,6 +84,7 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
 .palette-sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 .inspector-sidebar { display: flex; flex-direction: column; border-left: 1px solid var(--line); }
 .sidebar-title { min-height: 69px; padding: 13px 14px 10px 16px; display: flex; align-items: center; justify-content: space-between; }
+.sidebar-actions { display: flex; align-items: center; gap: 7px; }
 .sidebar-title h2 { margin: 3px 0 0; font-size: 15px; }
 .icon-button { width: 31px; height: 31px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--muted); }
 .icon-button:hover { color: var(--text); border-color: #445269; }
@@ -118,6 +119,7 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
 .edit-tools i { width: 1px; height: 19px; margin: 0 3px; background: var(--line); }
 .edit-tools button { width: 27px; height: 25px; padding: 0; display: grid; place-items: center; color: var(--muted); border-radius: 4px; background: transparent; }
 .edit-tools button:hover { color: var(--text); background: var(--panel-3); }
+.edit-tools button.active { color: var(--accent); background: var(--accent-dark); }
 .scope-timing { justify-self: end; display: flex; align-items: center; gap: 6px; color: var(--muted-2); font-size: 9px; }
 .scope-timing strong { color: #cbd4df; font-family: "JetBrains Mono", monospace; font-size: 10px; }
 .canvas-area { position: relative; min-height: 0; overflow: hidden; }
@@ -125,7 +127,12 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
 .canvas-shell canvas { display: block; cursor: default; }
 .canvas-shell.is-placing canvas { cursor: crosshair; }
 .canvas-shell.is-wiring canvas { cursor: crosshair; }
+.canvas-shell.is-marquee canvas { cursor: crosshair; }
 .canvas-shell.is-panning canvas { cursor: grabbing; }
+.canvas-zoom-controls { position: absolute; z-index: 8; top: 10px; right: 10px; display: none; overflow: hidden; border: 1px solid #2b394c; border-radius: 7px; background: rgba(13,17,24,.9); box-shadow: 0 5px 18px rgba(0,0,0,.18); }
+.canvas-zoom-controls button { min-width: 40px; height: 36px; padding: 0 8px; color: #9eabbd; background: transparent; border-right: 1px solid #2b394c; font: 600 11px "JetBrains Mono", monospace; }
+.canvas-zoom-controls button:last-child { border-right: 0; }
+.canvas-zoom-controls button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .canvas-badges { position: absolute; right: 10px; bottom: 9px; display: flex; gap: 4px; pointer-events: none; }
 .canvas-badges span { padding: 4px 7px; color: #68778b; background: rgba(13,17,24,.86); border: 1px solid #202a38; border-radius: 4px; font: 8px "JetBrains Mono", monospace; }
 .placement-hint { position: absolute; left: 50%; top: 13px; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; padding: 7px 12px; background: #17382e; border: 1px solid #316f5a; border-radius: 20px; box-shadow: 0 5px 20px rgba(0,0,0,.3); color: #a8f5d5; font-size: 10px; pointer-events: none; }
@@ -156,6 +163,7 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
 .tick-speed > div { display: flex; align-items: center; }
 .tick-speed > div input { width: 65px; height: 29px; padding: 0 6px; border: 1px solid var(--line); border-radius: 5px 0 0 5px; background: #0c1118; font: 10px "JetBrains Mono", monospace; }
 .tick-speed > div span { height: 29px; display: grid; place-items: center; padding: 0 6px; border: 1px solid var(--line); border-left: 0; border-radius: 0 5px 5px 0; color: var(--muted); font-size: 8px; }
+.mobile-sim-toggle { display: none; }
 
 .inspector-tabs { height: 46px; display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
 .inspector-tabs button { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--muted); background: transparent; font-size: 10px; }
@@ -335,6 +343,11 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
 .project-list > button { width: 100%; padding: 11px; display: flex; align-items: center; justify-content: space-between; text-align: left; border: 1px solid var(--line); border-radius: 7px; background: #141b25; }
 .project-list > button.active { border-color: #356c59; background: #162820; }.project-list button div { display: flex; flex-direction: column; gap: 4px; }.project-list strong { font-size: 11px; }.project-list span { color: var(--muted); font-size: 8px; }.current-pill { padding: 4px 6px; border-radius: 3px; color: var(--accent) !important; background: #1d4739; font: 7px "JetBrains Mono", monospace; }
 
+.mobile-dock,
+.mobile-panel-close,
+.mobile-canvas-hint { display: none; }
+.inspector-tabs .mobile-panel-close { display: none; }
+
 /* Friendly — 明るく、読みやすく、道具感を残したフラットテーマ。 */
 .app-shell[data-theme="friendly"] {
   --bg: #edf2f7;
@@ -391,6 +404,9 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
 .app-shell[data-theme="friendly"] .property-list strong,
 .app-shell[data-theme="friendly"] .issue-list strong { color: #34465a; }
 .app-shell[data-theme="friendly"] .canvas-badges span { color: var(--muted); background: color-mix(in srgb, var(--panel) 90%, transparent); border-color: var(--line); }
+.app-shell[data-theme="friendly"] .canvas-zoom-controls { border-color: var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 5px 18px rgba(55,75,98,.12); }
+.app-shell[data-theme="friendly"] .canvas-zoom-controls button { color: var(--muted); border-color: var(--line); }
+.app-shell[data-theme="friendly"] .canvas-zoom-controls button:hover { color: var(--text); background: var(--panel-2); }
 .app-shell[data-theme="friendly"] .placement-hint,
 .app-shell[data-theme="friendly"] .wire-cancel { color: #176f58; background: #e2f5ed; border-color: #72b7a1; box-shadow: 0 4px 12px rgba(55,75,98,.1); }
 .app-shell[data-theme="friendly"] .wire-edit-hint { color: var(--muted); background: color-mix(in srgb, var(--panel) 94%, transparent); border-color: var(--line); }
@@ -476,4 +492,120 @@ code, pre, .mono-input { font-family: "JetBrains Mono", ui-monospace, Consolas, 
   .design-switcher { margin-right: 5px; }
   .top-actions .design-switcher button { min-width: 35px; }
   .project-heading { justify-self: start; padding-left: 20px; }
+}
+
+@media (max-width: 980px) {
+  .app-shell { width: 100%; height: 100dvh; min-width: 0; }
+  .topbar { height: 54px; flex-basis: 54px; grid-template-columns: 52px minmax(0, 1fr); }
+  .topbar { z-index: 40; }
+  .brand { padding: 0 8px; justify-content: center; border-right: 1px solid var(--line); }
+  .brand-mark { width: 35px; height: 35px; }
+  .brand > div:last-child { display: none; }
+  .project-heading { min-width: 0; width: 100%; justify-self: stretch; justify-content: stretch; gap: 7px; padding: 0 11px; }
+  .project-heading > input { min-width: 0; width: 100%; padding-inline: 5px; text-align: left; font-size: 13px; }
+  .save-state { flex: 0 0 auto; gap: 0; font-size: 0; }
+  .save-state > span { width: 8px; height: 8px; }
+
+  .top-actions { display: none; }
+  .top-actions.mobile-open { position: fixed; z-index: 45; top: 54px; left: 0; right: 0; height: auto; padding: 7px 8px 8px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; border-bottom: 1px solid var(--line); background: var(--panel); box-shadow: 0 12px 28px rgba(0,0,0,.3); }
+  .top-actions.mobile-open > button { width: 100%; min-width: 0; height: 54px; padding: 0 5px; gap: 4px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-2); font-size: 9px; }
+  .top-actions.mobile-open > button > span,
+  .top-actions.mobile-open .design-switcher > button > span { display: inline; }
+  .top-actions.mobile-open .design-switcher { grid-column: 1 / -1; width: 100%; height: 43px; margin: 0; }
+  .top-actions.mobile-open .design-switcher > button { height: 35px; min-width: 90px; }
+  .top-actions.mobile-open .design-switcher .palette-trigger { min-width: 0; flex: 1; }
+  .top-actions.mobile-open .palette-popover { position: fixed; top: 105px; left: 8px; right: 8px; width: auto; max-height: calc(100dvh - 178px); }
+
+  .workspace { position: relative; display: block; min-height: 0; }
+  .editor-column { width: 100%; height: 100%; grid-template-rows: 46px minmax(0, 1fr) auto; }
+  .palette-sidebar,
+  .inspector-sidebar { display: none; }
+  .palette-sidebar.mobile-open,
+  .inspector-sidebar.mobile-open { position: absolute; z-index: 30; inset: 0; width: 100%; display: flex; border: 0; background: var(--panel); }
+  .sidebar-title { min-height: 58px; padding: 9px 13px; border-bottom: 1px solid var(--line-soft); }
+  .sidebar-title h2 { font-size: 16px; }
+  .mobile-panel-close { display: grid; }
+  .palette-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+  .palette-grid button { min-height: 70px; font-size: 10px; }
+  .custom-list button { min-height: 50px; }
+  .inspector-tabs { height: 50px; grid-template-columns: 1fr 1fr 48px; }
+  .inspector-tabs .mobile-panel-close { display: flex; border-left: 1px solid var(--line-soft); }
+  .inspector-section { padding: 16px; }
+
+  .editor-toolbar { display: flex; gap: 7px; padding: 5px 7px; overflow-x: auto; scrollbar-width: none; }
+  .editor-toolbar::-webkit-scrollbar { display: none; }
+  .breadcrumbs,
+  .edit-tools { flex: 0 0 auto; }
+  .scope-timing { display: none; }
+  .edit-tools button { width: 32px; height: 30px; }
+  .edit-tools i { margin-inline: 2px; }
+
+  .canvas-zoom-controls { display: flex; }
+  .canvas-zoom-controls button { min-width: 42px; height: 40px; }
+  .canvas-badges { left: 8px; right: auto; bottom: 8px; max-width: calc(100% - 16px); }
+  .canvas-badges > span:first-child,
+  .desktop-canvas-hint { display: none; }
+  .canvas-badges .mobile-canvas-hint { display: block; font-size: 9px; }
+  .placement-hint { max-width: calc(100% - 22px); width: max-content; text-align: center; line-height: 1.35; }
+  .wire-edit-hint { left: 8px; right: 8px; bottom: 37px; max-width: none; font-size: 8px; }
+  .signal-tooltip { display: none; }
+
+  .simulation-bar { position: relative; display: block; padding: 6px 8px; }
+  .transport { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .transport::-webkit-scrollbar { display: none; }
+  .transport > button,
+  .advance-control { flex: 0 0 auto; }
+  .transport > button,
+  .advance-control button { height: 38px; }
+  .advance-control input { height: 38px; }
+  .sim-stats,
+  .tick-speed { display: none; }
+  .mobile-sim-toggle { position: absolute; z-index: 9; right: 8px; top: -34px; height: 29px; padding: 0 8px; display: flex; align-items: center; gap: 4px; color: var(--muted); border: 1px solid var(--line); border-radius: 7px; background: var(--panel); box-shadow: 0 4px 12px rgba(0,0,0,.16); font-size: 9px; }
+  .simulation-bar.mobile-expanded { display: grid; grid-template-columns: 1fr; gap: 9px; padding-block: 8px 10px; }
+  .simulation-bar.mobile-expanded .sim-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .simulation-bar.mobile-expanded .sim-stats > div { padding: 7px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-2); }
+  .simulation-bar.mobile-expanded .tick-speed { display: flex; width: 100%; }
+
+  .mobile-dock { min-height: 56px; flex: 0 0 calc(56px + env(safe-area-inset-bottom)); padding: 3px 5px env(safe-area-inset-bottom); z-index: 50; display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; border-top: 1px solid var(--line); background: var(--panel); box-shadow: 0 -5px 18px rgba(0,0,0,.2); }
+  .mobile-dock button { min-width: 0; min-height: 50px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); border-radius: 8px; background: transparent; font-size: 9px; }
+  .mobile-dock button.active { color: var(--accent); background: var(--accent-dark); }
+
+  .fatal-toast { left: 8px; right: 8px; bottom: calc(112px + env(safe-area-inset-bottom)); min-width: 0; transform: none; }
+  .palette-toast { top: 62px; min-width: 0; width: calc(100% - 20px); }
+
+  .modal-backdrop { padding: 8px; }
+  .modal,
+  .modal-wide { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 9px; }
+  .modal > header { min-height: 56px; padding: 10px 11px 9px 14px; }
+  .modal h2 { font-size: 15px; }
+  .form-stack { padding: 14px; gap: 13px; }
+  .port-editor-row { grid-template-columns: minmax(0, 1fr) 96px 34px; }
+  .port-editor-row .inline-field { grid-column: 1 / 3; grid-row: 2; }
+  .port-editor-row > .icon-button { grid-column: 3; grid-row: 1 / 3; align-self: stretch; height: auto; }
+  .modal-actions { min-height: 55px; padding: 9px 12px; }
+  .memory-layout { display: flex; flex-direction: column; overflow-y: auto; }
+  .memory-grid-section { min-height: 430px; flex: 0 0 auto; padding: 10px; }
+  .memory-file-panel { flex: 0 0 auto; padding: 14px; overflow: visible; border-left: 0; border-top: 1px solid var(--line); }
+  .pico-layout { padding: 14px; grid-template-columns: 1fr; justify-items: center; gap: 17px; }
+  .pico-debug { width: 100%; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .dump-grid { min-width: 520px; }
+  .dump { width: 100%; overflow-x: auto; }
+  .tests-toolbar { padding-inline: 12px; }
+  .tests-table-wrap { padding: 0 10px 10px; }
+  .hdl-toolbar { padding: 9px 11px; flex-wrap: wrap; gap: 8px; }
+  .segmented { max-width: 100%; overflow-x: auto; }
+  .segmented button { flex: 0 0 auto; }
+  .code-view { margin: 9px 10px 10px; padding: 11px; }
+}
+
+@media (max-width: 390px) {
+  .edit-tools button { width: 30px; }
+  .breadcrumbs button { padding-inline: 5px; }
+  .custom-palette-editor > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .palette-options button > i { display: flex; }
+  .palette-options button > i b { flex: 1; }
+  .top-actions .palette-popover .palette-options button { grid-template-columns: 74px minmax(0, 1fr) 16px; }
+  .tests-toolbar { align-items: flex-start; gap: 6px; }
+  .tests-toolbar .button-row { width: 100%; }
 }
